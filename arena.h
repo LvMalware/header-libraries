@@ -30,7 +30,7 @@
 #include <string.h>
 
 #ifndef ARENADEF
-#define ARENADEF
+#define ARENADEF static inline
 #endif /* ARENADEF */
 
 #ifdef ARENA_MMAP_BACKEND                   /* use mmap/munmap for portability (and speed) */
@@ -48,7 +48,7 @@
 #endif /* ARENA_MMAP_BACKEND */
 
 /* 4KB is the most common page size, so by default the arena will allocate 2 pages on most systems */
-#define _ARENADEFAULT_CAPACITY             (2 * 4096)
+#define ARENA_DEFAULT_CAPACITY             (2 * 4096)
 
 struct _memory_region {
     size_t                  size;
@@ -68,8 +68,6 @@ typedef struct _arena {
     struct _memory_region   *tail;
 } s_arena, p_arena[1];
 
-#ifdef ARENA_IMPLEMENTATION
-
 ARENADEF struct _memory_region *_alloc_memory_region(size_t size, struct _memory_region *next) {
     struct _memory_region *region = _ARENA_INVALID_ALLOC;
 
@@ -85,25 +83,27 @@ ARENADEF struct _memory_region *_alloc_memory_region(size_t size, struct _memory
 }
 
 ARENADEF void _arena_append_region(p_arena arena, size_t size) {
-    struct _memory_region *region = _alloc_memory_region(size, NULL);
-    if (arena->tail) {
-        arena->tail->next = region;
-    } else {
-        arena->head = region;
+    struct _memory_region *region = _ARENA_INVALID_ALLOC;
+
+    if ((region = _ARENA_BACKEND_ALLOC(sizeof(*region) + size)) == _ARENA_INVALID_ALLOC) {
+        _arena_fprintf(stderr, "%s:%d: Failed to allocate %lu bytes\n", __FILE__, __LINE__, sizeof(*region) + size);
+        abort();
     }
+
+    region->next = NULL;
+    region->size = size;
+    region->offset = 0;
+
+    if (arena->tail) arena->tail->next = region;
+    if (!arena->head) arena->head = region;
+
     arena->tail = region;
     arena->total += sizeof(*arena->tail) + arena->tail->size;
 }
 
-ARENADEF void _arena_prepend_region(p_arena arena, size_t size) {
-    arena->head = _alloc_memory_region(size, arena->head);
-    if (arena->tail == NULL) arena->tail = arena->head;
-    arena->total += sizeof(*arena->head) + arena->head->size;
-}
-
 ARENADEF void arena_init(p_arena arena) {
     arena->total = 0;
-    _arena_append_region(arena, _ARENADEFAULT_CAPACITY);
+    _arena_append_region(arena, ARENA_DEFAULT_CAPACITY);
 }
 
 ARENADEF void arena_deinit(p_arena arena) {
@@ -128,7 +128,7 @@ ARENADEF void *arena_alloc(p_arena arena, size_t size) {
     }
 
     if (region == NULL) {
-        _arena_append_region(arena, required > _ARENADEFAULT_CAPACITY ? required : _ARENADEFAULT_CAPACITY);
+        _arena_append_region(arena, required > ARENA_DEFAULT_CAPACITY ? required : ARENA_DEFAULT_CAPACITY);
         region = arena->tail;
     }
 
@@ -186,7 +186,5 @@ ARENADEF void *arena_realloc(p_arena arena, void *ptr, size_t size) {
 }
 
 #define arena_memclone(arena, ptr, size) memcpy(arena_alloc((arena), (size)), (ptr), (size))
-
-#endif /* ARENA_IMPLEMENTATION */
 
 #endif /* arena.h */
